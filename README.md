@@ -1,4 +1,4 @@
-# keus_ROBOTICS
+# Line following bot with vision integration
 
 > Autonomous line-following robot with real-time object detection, obstacle avoidance, and a live web dashboard.
 
