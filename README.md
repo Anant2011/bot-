@@ -1,5 +1,5 @@
-
-An autonomous line-following robot with real-time object detection, obstacle avoidance, and a Raspberry Pi web dashboard.
+keus_ROBOTICS
+> Autonomous line-following robot with real-time object detection, obstacle avoidance, and a live web dashboard.
 ---
 Table of Contents
 Project Overview
@@ -7,9 +7,9 @@ Repository Structure
 Hardware Requirements
 System Architecture
 Module Documentation
-ESP32 Firmware — `Esp_code/main.ino`
-ML Training — `ML_train_code/`
-Raspberry Pi Server — `Rasberry_pi_code/main.py`
+ESP32 Firmware
+ML Training
+Raspberry Pi Server
 Model Weights Configuration
 Setup & Installation
 Running the Project
@@ -19,40 +19,41 @@ Tuning & Configuration
 Troubleshooting
 ---
 Project Overview
-`keus_ROBOTICS` is a full-stack robotics project combining embedded real-time control, computer vision, and a web interface into a single cohesive system. The robot:
-Follows a line autonomously using a 6-sensor IR array with smooth, sharp, and memory-assisted turn correction
-Avoids obstacles using three ultrasonic sensors (front, left, right), executing a dynamic 180° turn on front detection and a servo-sweep inspection on side detection
-Detects 18 object classes in real time using a custom-trained YOLOv8 model running on a Raspberry Pi camera — including brand logos, faces, vehicles, pets, QR codes, and more
-Streams video and detection data live to a web dashboard accessible from any device on the local network
-Records runs to `.avi` video files with timestamped detection logs
+`keus_ROBOTICS` combines embedded control, computer vision, and a web interface in one system.
+Feature	Details
+Line Following	6-sensor IR array — smooth, sharp, and memory-assisted correction
+Obstacle Avoidance	3× ultrasonic sensors — dynamic 180° front turn, servo sweep on sides
+Object Detection	Custom YOLOv8 model, 18 classes, runs on Raspberry Pi camera
+Live Dashboard	MJPEG stream + detection panel via Flask on port 5000
+Run Recording	`.avi` video + timestamped `.txt` detection log per session
 ---
 Repository Structure
 ```
 keus_ROBOTICS/
 ├── Esp_code/
-│   └── main.ino              # ESP32 firmware: line following + obstacle avoidance
+│   └── main.ino              # ESP32: line following + obstacle avoidance
 │
 ├── ML_train_code/
 │   ├── dataset/              # Training images and labels (YOLO format)
-│   ├── dataset.yaml          # Dataset configuration for Ultralytics YOLO
-│   ├── train_boxes.py        # Script to train the YOLOv8 detection model
-│   └── test_boxes.py         # Script to test trained model on a webcam
+│   ├── dataset.yaml          # Ultralytics dataset config
+│   ├── train_boxes.py        # Train the YOLOv8 model
+│   └── test_boxes.py         # Test model on webcam
 │
 └── Rasberry_pi_code/
-    └── main.py               # Flask server: camera stream, YOLO inference, recording
+    └── main.py               # Flask server: stream, inference, recording
 ```
 ---
 Hardware Requirements
 Component	Details
-Microcontroller	ESP32 (tested with ESP32-WROOM-32)
-Single-Board Computer	Raspberry Pi (4 recommended; any Pi with `picamera2` support)
-Camera	Raspberry Pi Camera Module (v3 or HQ)
-Motor Driver	L298N or compatible dual H-bridge
+Microcontroller	ESP32-WROOM-32
+Single-Board Computer	Raspberry Pi 4 (any Pi with `picamera2` support)
+Camera	Raspberry Pi Camera Module v3 or HQ
+Motor Driver	L298N dual H-bridge
 DC Motors	4× (differential drive)
-IR Sensor Array	6-channel digital IR line sensor
+IR Sensor Array	6-channel digital
 Ultrasonic Sensors	3× HC-SR04 (front, left, right)
-Servo Motor	Standard hobby servo (connected to pin 15 on ESP32)
-Power Supply	Suitable LiPo or battery pack for motors + logic
+Servo	Standard hobby servo on pin 15
+Power	LiPo / battery pack for motors + logic
 ---
 System Architecture
 ```
@@ -84,11 +85,11 @@ System Architecture
 │  └────────────────────────────┘ │
 └─────────────────────────────────┘
 ```
-The ESP32 and Raspberry Pi operate independently on the same robot chassis. The ESP32 handles all low-level control in real time. The Raspberry Pi handles vision and user-facing features.
+> The ESP32 and Raspberry Pi run independently on the same chassis.  
+> ESP32 → real-time control. Raspberry Pi → vision + dashboard.
 ---
 Module Documentation
 ESP32 Firmware — `Esp_code/main.ino`
-This firmware runs on the ESP32 and handles all real-time motor and sensor control.
 Pin Assignments
 Function	Pins
 Left motor (IN1, IN2, ENA)	22, 23, 18
@@ -99,158 +100,114 @@ Left ultrasonic (trig / echo)	12 / 13
 Right ultrasonic (trig / echo)	2 / 4
 Servo (head)	15
 Line Following Logic
-The 6 IR sensors produce a binary 6-bit state. The firmware maps each state to a driving behavior:
+6 IR sensors produce a 6-bit state, mapped to a drive behavior:
 Sensor Pattern	Behavior
-`001100`, `001000`, `000100`, `011110`	Drive forward
-`011000`, `010000`, `011100`	Gentle left (inner wheel slowed)
-`110000`, `111000`, `101000`	Moderate left (inner wheel stopped)
-`100000`, `111100`, `111110`	Sharp left (inner wheel reversed briefly)
-`000110`, `000010`, `001110`	Gentle right (inner wheel slowed)
-`000011`, `000111`, `000101`	Moderate right (inner wheel stopped)
-`000001`, `001111`, `011111`	Sharp right (inner wheel reversed briefly)
-`111111`	All black (crossroad) — brake
-`000000`	Line lost — memory sweep then active scan
+`001100` `001000` `000100` `011110`	Forward
+`011000` `010000` `011100`	Gentle left — inner wheel slowed
+`110000` `111000` `101000`	Moderate left — inner wheel stopped
+`100000` `111100` `111110`	Sharp left — inner wheel reversed briefly
+`000110` `000010` `001110`	Gentle right — inner wheel slowed
+`000011` `000111` `000101`	Moderate right — inner wheel stopped
+`000001` `001111` `011111`	Sharp right — inner wheel reversed briefly
+`111111`	All black / crossroad — brake
+`000000`	Line lost — enter recovery
 Lost-Line Recovery
-When all sensors read `0`, the firmware enters a two-phase recovery:
-Memory phase — continues turning in `lastDirection` for a short timeout (`sweepTimeoutStraight` = 100 ms for straight, `sweepTimeoutTurn` = 700 ms for turns)
-Active scan phase — keeps spinning in the last known direction until any sensor detects black again, with a 10-second hard brake failsafe
+Phase	Action
+Memory	Continue in `lastDirection` for `sweepTimeoutStraight` (100 ms) or `sweepTimeoutTurn` (700 ms)
+Active scan	Keep spinning in last known direction until any sensor sees black; hard brake after 10 s
 Obstacle Avoidance
-Front (`< 15 cm`): Executes `execute180Turn()` — brakes, spins right until center sensors re-acquire the line behind, then mutes all ultrasonic sensors for a dynamically calculated freeze duration based on how long the robot had been running: `freeze = 2 × (runTime − 3000 ms)`
-Left (`< 20 cm`): Brakes, sweeps servo to 180° for 3 seconds, recenters, then freezes the left sensor for 2 seconds
-Right (`< 20 cm`): Brakes, sweeps servo to 0° for 3 seconds, recenters, then freezes the right sensor for 2 seconds
+Sensor	Threshold	Response
+Front	< 15 cm	`execute180Turn()` — brake → spin right → wait for center sensors to re-acquire line → freeze all sensors for `2 × (runTime − 3 s)`
+Left	< 20 cm	Brake → servo to 180° → wait 3 s → recenter → freeze left sensor 2 s
+Right	< 20 cm	Brake → servo to 0° → wait 3 s → recenter → freeze right sensor 2 s
 Speed Constants
-Constant	Default Value	Purpose
-`baseSpeed`	85	Normal forward speed
-`turnSpeed`	135	Outer wheel speed during gentle turns
-`innerWheelSpeed`	75	Inner wheel speed during gentle turns
-`sharpTurnSpeed`	160	Outer wheel speed during sharp turns
-`sharpReverseSpeed`	100	Inner wheel reverse speed during sharp turns
+Constant	Value	Purpose
+`baseSpeed`	85	Forward speed
+`turnSpeed`	135	Outer wheel — gentle turn
+`innerWheelSpeed`	75	Inner wheel — gentle turn
+`sharpTurnSpeed`	160	Outer wheel — sharp turn
+`sharpReverseSpeed`	100	Inner wheel — sharp turn (reverse)
 ---
 ML Training — `ML_train_code/`
-This module contains all code and configuration needed to train and test the object detection model.
-`dataset.yaml`
-Defines the dataset structure for Ultralytics YOLO. The model is trained on 18 classes:
-```yaml
-path: dataset
-train: train/images
-val: valid/images
-
-nc: 18
-names:
-  - Brandlogo_Maybechlogo
-  - Brandlogo_Teslalogo
-  - Brandlogo_applelogo
-  - Brandlogo_keuslogo
-  - QRcode
-  - chair
-  - faces_RogerFederer
-  - faces_henryCavill
-  - faces_keanureeves
-  - numberplate
-  - parcelbox
-  - pets_cat
-  - pets_dog
-  - smartswitch
-  - table
-  - vehicle_bicycle
-  - vehicle_car
-  - vehicle_motorbike
-```
-Ensure your dataset folder is structured as:
+Dataset Structure
 ```
 dataset/
 ├── train/
-│   ├── images/   # .jpg / .png files
-│   └── labels/   # .txt files (YOLO format bounding boxes)
+│   ├── images/        # .jpg / .png
+│   └── labels/        # YOLO format .txt  (class cx cy w h)
 └── valid/
     ├── images/
     └── labels/
 ```
-`train_boxes.py` — Training
+`train_boxes.py` — Train
 ```python
 from ultralytics import YOLO
-
 model = YOLO("yolov8n.pt")
-model.train(
-    data="dataset.yaml",
-    epochs=2,
-    imgsz=640
-)
+model.train(data="dataset.yaml", epochs=2, imgsz=640)
 ```
-Run with:
 ```bash
 python train_boxes.py
 ```
-Trained weights are saved to `runs/detect/trainN/weights/best.pt`. Increase `epochs` significantly (50–100+) for production-grade accuracy — 2 epochs is for quick smoke-testing only.
-`test_boxes.py` — Live Webcam Testing
+> Weights saved to `runs/detect/trainN/weights/best.pt`  
+> Use `epochs=50+` for real accuracy — `2` is a smoke-test value only.
+`test_boxes.py` — Test on Webcam
 ```python
-from ultralytics import YOLO
-import cv2
-
 model = YOLO("runs/detect/train/weights/best.pt")
 cap = cv2.VideoCapture(0)   # change index for external camera
 ```
-Run with:
 ```bash
 python test_boxes.py
 ```
-Press `q` to quit. The confidence threshold is set to `0.0032` by default — raise it to reduce false positives in a real environment.
+> Press `q` to quit.  
+> Default `conf=0.0032` — raise it to reduce false positives.
 ---
 Raspberry Pi Server — `Rasberry_pi_code/main.py`
-A Flask web server that captures frames from the Pi camera, runs YOLO inference, streams video to a browser, and handles recording.
-Key Components
-Camera: Uses `Picamera2` at 640×480. Converts frames from RGB to BGR for OpenCV compatibility.
-Inference: YOLO runs every 3 frames (to maintain a smooth stream) at `imgsz=320` with `conf=0.5`. These values are a performance trade-off and can be adjusted.
-Recording: Saves `.avi` files using MJPG codec at 10 FPS, up to a maximum of 10 minutes per session. Recording can be paused and resumed; elapsed time is accumulated across pauses.
-Logging: Each recording session generates a `run_<timestamp>_log.txt` file with timestamped object detections.
+How It Works
+Component	Detail
+Camera	`Picamera2` at 640×480, RGB → BGR conversion
+Inference	Every 3rd frame at `imgsz=320`, `conf=0.5`
+Recording	MJPG `.avi` at 10 FPS, 10-minute cap, pause/resume supported
+Logging	`run_<timestamp>_log.txt` — one `HH:MM:SS : label` line per detection
 API Endpoints
 Route	Method	Description
-`/`	GET	Web dashboard (HTML page)
-`/video_feed`	GET	MJPEG stream of the camera
-`/detections`	GET	JSON list of currently detected objects
-`/start`	GET	Start or resume recording
+`/`	GET	Web dashboard
+`/video_feed`	GET	MJPEG camera stream
+`/detections`	GET	JSON — currently detected objects
+
+`/start`	GET	Start / resume recording
 `/stop`	GET	Pause recording
 ---
 Model Weights Configuration
-> ⚠️ **Weights are not included in this repository and must be configured before running.**
-1. Base Model Weights (for training)
-In `train_boxes.py`:
+> ⚠️ Weights are **not included** in this repo. Configure them before running.
+Step 1 — Base weights (for training)
+Download `yolov8n.pt` from Ultralytics and place it in `ML_train_code/`.
 ```python
-model = YOLO("yolov8n.pt")  # ← Download from Ultralytics and place in ML_train_code/
+# train_boxes.py
+model = YOLO("yolov8n.pt")
 ```
-Download base weights from Ultralytics and place the file in the `ML_train_code/` directory, or provide the full path.
-2. Trained Weights (for inference)
-In `test_boxes.py`:
+Step 2 — Trained weights (for inference)
+After training, copy `best.pt` to the Raspberry Pi and update the path.
 ```python
-model = YOLO("runs/detect/train/weights/best.pt")  # ← Update to your training run output
+# test_boxes.py
+model = YOLO("runs/detect/train/weights/best.pt")
+
+# main.py
+model = YOLO("runs/detect/train/weights/best.pt")
 ```
-In `Rasberry_pi_code/main.py`:
-```python
-model = YOLO("runs/detect/train/weights/best.pt")  # ← Replace with path to your trained best.pt
+Recommended Workflow
 ```
-After training, find your best weights at:
+Train on PC / GPU  →  copy best.pt to Pi  →  update path in main.py
 ```
-ML_train_code/runs/detect/trainN/weights/best.pt
-```
-where `N` is the run number. Copy `best.pt` to the Raspberry Pi and update the path in `main.py`.
-Recommended workflow:
-Train on a PC or GPU machine using `train_boxes.py`
-Copy the output `best.pt` to your Raspberry Pi
-Update the `YOLO(...)` path in `main.py` to point to it
 ---
 Setup & Installation
-ESP32 (Arduino IDE)
-Install Arduino IDE and add ESP32 board support
-Install the `ESP32Servo` library via Library Manager
+ESP32
+Install Arduino IDE + ESP32 board support
+Install `ESP32Servo` via Library Manager
 Open `Esp_code/main.ino`
-Select your ESP32 board and COM port
-Upload the sketch
-ML Training (PC / GPU machine)
+Select board + COM port → Upload
+ML Training (PC / GPU)
 ```bash
 pip install ultralytics opencv-python
-```
-Place your dataset in the folder specified by `path:` in `dataset.yaml` (default: `dataset/`). Then run:
-```bash
 cd ML_train_code
 python train_boxes.py
 ```
@@ -258,40 +215,41 @@ Raspberry Pi
 ```bash
 pip install flask picamera2 ultralytics opencv-python
 ```
-Copy your trained `best.pt` to the Pi and update the model path in `main.py` (see Model Weights Configuration).
+> Update `YOLO(...)` path in `main.py` to your `best.pt` location.
 ---
 Running the Project
-Start the ESP32
-Power on the robot. The ESP32 boots and waits 3 seconds before starting. It will begin line following automatically and print sensor state to Serial at 9600 baud for debugging.
-Start the Raspberry Pi Server
+ESP32
+Power on → waits 3 s → begins line following automatically
+Serial debug output at `9600` baud
+Raspberry Pi Server
 ```bash
 cd Rasberry_pi_code
 python main.py
 ```
-The server starts on port `5000`. Open a browser on any device connected to the same network and go to:
+Open in any browser on the same network:
 ```
 http://<raspberry-pi-ip>:5000
 ```
-Test ML Model (PC only, no Pi needed)
+Test ML on PC (no Pi needed)
 ```bash
 cd ML_train_code
 python test_boxes.py
 ```
 ---
 Dashboard Usage
-The web dashboard at `http://<pi-ip>:5000` provides:
-Live video feed with YOLO bounding boxes overlaid
-Detected Objects panel — updates every second via polling
-Start Recording button — begins saving video and detection log
-Pause Recording button — pauses the session (elapsed time is preserved for resume)
-On-screen overlays show:
+Element	Function
+Live video feed	Camera stream with YOLO bounding boxes overlaid
+Detected Objects	Updates every 1 s via `/detections` polling
+Start Recording	Saves `.avi` video + `.txt` detection log
+Pause Recording	Pauses session; elapsed time is preserved for resume
+On-screen OSD shows:
 Elapsed recorded time
-Remaining time before the 10-minute limit
-Current recording status (`Recording` / `Paused`)
+Remaining time (10-minute cap)
+Status: `Recording` / `Paused`
 ---
 Dataset & Classes
-The model detects 18 classes across several categories:
-Index	Class Name	Category
+18 detection classes across 6 categories:
+Index	Class	Category
 0	`Brandlogo_Maybechlogo`	Brand Logo
 1	`Brandlogo_Teslalogo`	Brand Logo
 2	`Brandlogo_applelogo`	Brand Logo
@@ -310,53 +268,43 @@ Index	Class Name	Category
 15	`vehicle_bicycle`	Vehicle
 16	`vehicle_car`	Vehicle
 17	`vehicle_motorbike`	Vehicle
-Labels are in YOLO bounding box format (`.txt` files with normalized `class cx cy w h` per line).
+> Label format: YOLO `.txt` — `class cx cy w h` (normalized, one object per line)
 ---
 Tuning & Configuration
-ESP32 — Speed & Timing
+ESP32 — Speed
 ```cpp
-const int baseSpeed = 85;           // Straight-line speed (0–255)
-const int turnSpeed = 135;          // Gentle curve outer wheel
-const int innerWheelSpeed = 75;     // Gentle curve inner wheel
-const int sharpTurnSpeed = 160;     // Sharp turn outer wheel
-const int sharpReverseSpeed = 100;  // Sharp turn inner wheel (reverse)
+const int baseSpeed          = 85;   // Forward speed (0–255)
+const int turnSpeed          = 135;  // Outer wheel, gentle turn
+const int innerWheelSpeed    = 75;   // Inner wheel, gentle turn
+const int sharpTurnSpeed     = 160;  // Outer wheel, sharp turn
+const int sharpReverseSpeed  = 100;  // Inner wheel, sharp turn (reverse)
 ```
-Increase `baseSpeed` for faster movement; lower `turnSpeed` for tighter curve tracking. Adjust the `delay()` values in `execute180Turn()` and sharp-turn cases to suit your chassis dimensions.
-The lost-line sweep timeouts can also be tuned:
+ESP32 — Lost-Line Timeouts
 ```cpp
-const unsigned long sweepTimeoutStraight = 100;  // ms before active scan (was going straight)
-const unsigned long sweepTimeoutTurn = 700;       // ms before active scan (was mid-turn)
+const unsigned long sweepTimeoutStraight = 100;  // ms — robot was going straight
+const unsigned long sweepTimeoutTurn     = 700;  // ms — robot was mid-turn
 ```
-Raspberry Pi — Inference Performance
+Raspberry Pi — Inference
 ```python
 results = model(frame, imgsz=320, conf=0.5)
 ```
-`imgsz=320` — Smaller image = faster inference. Increase to `640` for higher accuracy at the cost of FPS
-`conf=0.5` — Minimum confidence to log a detection. Raise to reduce false positives
-`if frame_count % 3 == 0:` — Inference runs every 3rd frame. Lower divisor for more frequent detection, higher for smoother stream
+Parameter	Effect
+`imgsz=320`	Lower = faster; raise to `640` for more accuracy
+`conf=0.5`	Minimum confidence; raise to reduce false positives
+`% 3`	Inference every Nth frame; raise for smoother stream
 Raspberry Pi — Recording
 ```python
-max_record_time = 600   # 10 minutes. Adjust as needed (seconds)
-fps = 10                # Recorded video FPS
+max_record_time = 600   # seconds (default 10 min)
+fps = 10                # output video FPS
 ```
 ---
 Troubleshooting
-Robot drifts on straight line  
-Calibrate your IR sensor array height and threshold. Adjust `baseSpeed` and `innerWheelSpeed` for your specific motors.
-Ultrasonic sensor gives erratic readings  
-The `pulseIn` timeout is set to `20000 µs`. If sensors read `999` (timeout fallback) frequently, check wiring and ensure there are no ground loops between trigger and echo pins.
-180° turn doesn't complete / overshoots  
-The turn uses dynamic center-sensor re-acquisition — if the line is faint or the sensor array is too high, it may not detect the line behind. Lower the sensor array or adjust the `sharpTurnSpeed` and `sharpReverseSpeed` constants.
-YOLO inference is too slow on Raspberry Pi  
-Reduce `imgsz` to `160` or `224`, and increase the frame-skip divisor (e.g., `% 5` instead of `% 3`). Consider using a quantized or INT8 model.
-`picamera2` fails to start  
-Ensure the camera interface is enabled in `raspi-config` and that no other process is using the camera. Run `libcamera-hello` to verify hardware.
-`best.pt` not found  
-Verify the path string in `YOLO(...)` is correct and the file exists on the Pi. Use an absolute path if needed:
-```python
-model = YOLO("/home/pi/weights/best.pt")
-```
-Video stream is blank in browser  
-Check that Flask is binding on `0.0.0.0` (it is by default) and that the firewall allows port 5000. Try accessing via IP directly rather than hostname.
-Side obstacle detection triggers while turning  
-The side sensors are intentionally frozen for 2 seconds after a side-obstacle event. If false triggers persist during 180° turns, they are suppressed by the dynamic `frontFreezeUntil / leftFreezeUntil / rightFreezeUntil` logic automatically.
+Problem	Fix
+Robot drifts on straight line	Adjust IR sensor height; tune `baseSpeed` / `innerWheelSpeed`
+Ultrasonic reads `999` constantly	Check wiring; look for ground loops on trigger/echo pins
+180° turn doesn't complete	Lower sensor array; tune `sharpTurnSpeed` / `sharpReverseSpeed`
+YOLO too slow on Pi	Set `imgsz=160`, increase frame-skip to `% 5`, use INT8 model
+`picamera2` fails to start	Enable camera in `raspi-config`; run `libcamera-hello` to verify
+`best.pt` not found	Use absolute path: `model = YOLO("/home/pi/weights/best.pt")`
+Video stream blank in browser	Confirm Flask binds `0.0.0.0`; allow port 5000 in firewall
+Side sensors false-trigger in turns	Already suppressed by dynamic freeze logic; check `freezeDuration` if it persists
